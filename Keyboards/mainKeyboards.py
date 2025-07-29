@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 Btn_rate_One = InlineKeyboardButton(text='1 месяц', callback_data='Rate_1')
 Btn_rate_Two = InlineKeyboardButton(text='3 месяца', callback_data='Rate_2')
 Btn_rate_Free = InlineKeyboardButton(text='6 месяцев', callback_data='Rate_3')
+Btn_rate_five = InlineKeyboardButton(text='12 месяцев', callback_data='Rate_4')
 
 # Инфо кнопки
 Btn_GoMiling = InlineKeyboardButton(text='Да, начать рассылку', callback_data='GoMiling')
@@ -18,11 +19,13 @@ SelectRates = InlineKeyboardMarkup(inline_keyboard=[
     [Btn_rate_One,Btn_rate_Two,Btn_rate_Free]
 ])
 
+
+
 StartBtns = InlineKeyboardMarkup(inline_keyboard=[
     [BtnShowRates],
     [BtnShowGroup],
     [Btn_Helper]
-])
+    ])
 
 BtnMiling = InlineKeyboardMarkup(inline_keyboard=[
     [Btn_GoMiling, Btn_StopMiling]
@@ -36,5 +39,5 @@ def generate_edit_posts_kb(posts):
             callback_data=f"edit_post_{post['message_id']}"
         )
         buttons.append([btn])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)@router.message(F.text.lower() == "редактировать пост")
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 

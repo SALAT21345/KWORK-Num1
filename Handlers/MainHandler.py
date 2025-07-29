@@ -2,7 +2,7 @@ from aiogram.filters import CommandStart,Command
 from aiogram.fsm.context import FSMContext
 from aiogram import Router,F
 from aiogram.types import Message, CallbackQuery
-from aiogram import types 
+from aiogram import types
 from aiogram.fsm.state import StatesGroup,State
 from aiogram.types import LabeledPrice,ChatInviteLink
 from calendar import monthrange
@@ -10,6 +10,7 @@ from CFG import Bot
 from Keyboards.mainKeyboards import StartBtns,SelectRates,BtnMiling
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime,timezone
+from aiogram.exceptions import TelegramBadRequest
 import BdController as BD
 import sqlite3
 router = Router()
@@ -46,9 +47,50 @@ async def Start(message: Message):
         pass
 
 
+
+@router.message(Command('ShowRates'))
 @router.callback_query(F.data == 'ShowRates')
 async def ShowRates(callback:CallbackQuery):
     await callback.message.answer(f'{CFG.InfoRatesMessage}',reply_markup=SelectRates)
+
+async def CheckSubUserAndKickForGroup(bot: Bot):
+    allUsers = BD.GetAllUsers()
+    for user in allUsers:
+        user_id = user[0]
+        end_sub_str = user[3]
+
+        # Пропускаем, если нет даты окончания
+        if not end_sub_str:
+            continue
+
+        # Преобразуем дату из строки в datetime
+        try:
+            end_sub = datetime.strptime(end_sub_str, "%Y-%m-%d")
+        except ValueError:
+            continue  # если неверный формат даты — пропускаем
+
+        # Если подписка еще активна — пропускаем
+        if end_sub.date() >= datetime.now().date():
+            continue
+
+        # Получаем статус пользователя в группе
+        try:
+            member = await bot.get_chat_member(chat_id=-1002899688608, user_id=user_id)
+        except Exception as e:
+            print(f"Ошибка получения статуса пользователя {user_id}: {e}")
+            continue
+
+        # Пропускаем владельцев и админов
+        if member.status in ("creator", "administrator"):
+            continue
+
+        # Кикаем: ban + unban, чтобы мог вернуться при новой подписке
+        try:
+            await bot.ban_chat_member(chat_id=-1002899688608, user_id=user_id)
+            await bot.unban_chat_member(chat_id=-1002899688608, user_id=user_id)
+        except Exception as e:
+            print(f"Ошибка при удалении пользователя {user_id}: {e}")
+
 
 
 # Admin Commands
@@ -147,12 +189,12 @@ async def delete_notification_handler(message: Message):
     if message.from_user.id != CFG.admin_id:
         await message.answer("У вас нет доступа к этой команде.")
         return
-    
+
     args = message.text.split()
     if len(args) != 2 or not args[1].isdigit():
         await message.answer("Использование команды: /delete_notification <число_дней>")
         return
-    
+
     days_before = int(args[1])
     success = BD.DeleteNotificationMessage(days_before)
     if success:
@@ -165,17 +207,17 @@ async def show_notifications_handler(message: Message):
     if message.from_user.id != CFG.admin_id:
         await message.answer("У вас нет доступа к этой команде.")
         return
-    
+
     notifications = BD.GetAllNotificationMessages()
     if not notifications:
         await message.answer("Сообщения для уведомлений не установлены.")
         return
-    
+
     text = "Установленные уведомления:\n\n"
     for row in notifications:
         days_before, msg = row
         text += f"За {days_before} дней до окончания подписки:\n{msg}\n\n"
-    
+
     await message.answer(text)
 
 
@@ -186,16 +228,44 @@ async def CreateNewPostGetText(message:Message,state:FSMContext):
         await state.set_state(CreateNewPostState.GetText)
     else:
         await message.answer("У вас нет доступа к админ панеле.")
-        
+
 
 
 
 @router.message(CreateNewPostState.GetText)
-async def CreateNewPost(message:Message, state:FSMContext):
-    await post_to_channel(message.bot, -4774948031, message.text)
+async def CreateNewPost(message: Message, state: FSMContext):
+    caption = message.caption or message.text or ""
+    file_id = None
+
+    if message.photo:
+        file_id = message.photo[-1].file_id  # самое большое фото
+        msg = await post_photo_to_channel(message.bot, -1002899688608, file_id, caption, message.from_user.id)
+        if msg is None:
+            return  #
+    elif message.video:  # проверка на наличие видео
+        file_id = message.video.file_id
+        msg = await message.bot.send_video(chat_id=-1002899688608, video=file_id, caption=caption)
+    else:
+        msg = await message.bot.send_message(chat_id=-1002899688608, text=caption)
+
+    raw_date = str(msg.date)
+    dt = datetime.fromisoformat(raw_date)
+    formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
+    BD.SaveNewPost(formatted, msg.message_id)
+
+    await message.answer("✅ Пост опубликован.")
     await state.clear()
 
+async def post_photo_to_channel(bot: Bot, chat_id: int, file_id: str, caption: str, user_id: int) -> Message:
+    if len(caption) > 1024:
+        await bot.send_message(user_id, "❌ Ошибка: описание слишком длинное. Максимум 1024 символа.")
+        return None
 
+    return await bot.send_photo(
+        chat_id=chat_id,
+        photo=file_id,
+        caption=caption
+    )
 
 @router.message(Command("ChangeMessageOfRates"))
 async def ChangeMessageOfRates(message:Message,state:FSMContext):
@@ -240,7 +310,7 @@ async def GetAllUser(message:Message):
                 AllUsersInfo += TempInfo + "\n\n"
         else:
             AllUsersInfo = "Нет пользователей в базе данных."
-        
+
         await message.answer(AllUsersInfo,parse_mode="HTML",disable_web_page_preview=True)
     else:
         await message.answer("У вас нет доступа к админ панеле.")
@@ -254,7 +324,7 @@ async def mailingCommand(message:Message,state:FSMContext):
         await state.set_state(CreateMailing.GetText)
     else:
         await message.answer("У вас нет доступа к админ панеле.")
-        
+
 @router.callback_query(F.data =='StopMiling')
 async def mailing(callback:CallbackQuery,state:FSMContext):
     if callback.message.chat.id == CFG.admin_id:
@@ -276,19 +346,20 @@ async def GoMailing(callback: CallbackQuery, bot: Bot, state: FSMContext):
         await bot.send_message(chat_id=user[0], text=text)
     await callback.message.answer("Рассылка успешно завершена!")
     await state.clear()
-            
 
 
-    
+
+
 
 
 
 @router.callback_query(F.data == 'Rate_1')          # CallBack Начало подписок
 @router.callback_query(F.data == 'Rate_2')
 @router.callback_query(F.data == 'Rate_3')
+@router.callback_query(F.data == 'Rate_4')
 async def Payment(callback: CallbackQuery, bot: Bot):
     price = 2500
-    rate = callback.data  
+    rate = callback.data
     Rate = 0
     tariff = rate.split('_')[1]
 
@@ -304,6 +375,10 @@ async def Payment(callback: CallbackQuery, bot: Bot):
         price = 1200000
         title = 'Тариф на 6 месяцев'
         Rate = 6
+    elif tariff == "4":
+        price = 2400000
+        title = 'Тариф на 12 месяцев'
+        Rate = 12
     else:
         await callback.message.answer("Неизвестный тариф")
         return
@@ -315,7 +390,7 @@ async def Payment(callback: CallbackQuery, bot: Bot):
         title=title,
         description="Оплата подписки на контент",
         payload=str(Rate),
-        provider_token="381764678:TEST:131904", 
+        provider_token="381764678:TEST:133159",
         currency="RUB",
         prices=prices,
         start_parameter="test-invoice",
@@ -347,19 +422,19 @@ async def successful_payment(message: Message,bot:Bot):
     await message.answer("Ниже будут посты, уже вышедшие в этом месяце. Весь остальной контент будет ждать вас ежедневно в нашей закрытой группе 🧡")
     await get_my_posts(message=message, bot=message.bot)
     await PostMessageForNewSub(User_id=message.chat.id,bot=bot)
-    
+
                                                                                 # Functions
 
 
 async def create_invite(message, bot):
     try:
-        chat_id = -4774948031
+        chat_id = -1002899688608
 
         invite_link: ChatInviteLink = await bot.create_chat_invite_link(
             chat_id=chat_id,
-            expire_date=None,           
-            member_limit=1,             
-            creates_join_request=False  
+            expire_date=None,
+            member_limit=1,
+            creates_join_request=False
         )
 
         await message.answer(f"Вот твоя персональная ссылка на вступление в группу:\n{invite_link.invite_link}",parse_mode=None)
@@ -370,11 +445,23 @@ async def create_invite(message, bot):
 async def get_my_posts(message, bot):
     posts = BD.Get_Posts_From_Start_Of_Month()
     for post in posts:
-        await bot.copy_message(
-            chat_id=message.chat.id,
-            from_chat_id=post["channel_id"],
-            message_id=post["message_id"]
-        )
+        try:
+            await bot.copy_message(
+                chat_id=message.chat.id,
+                from_chat_id=post["channel_id"],
+                message_id=post["message_id"]
+            )
+        except TelegramBadRequest as e:
+            if "message to copy not found" in str(e):
+                # Сообщение удалено или недоступно — пропускаем этот пост
+                print(f"Пропускаю пост message_id={post['message_id']} — сообщение не найдено")
+                continue
+            else:
+                # Если другая ошибка — выбрасываем дальше
+                raise
+        except Exception as e:
+            # Можно добавить логирование или обработку других исключений
+            print(f"Ошибка при копировании сообщения {post['message_id']}: {e}")
 
 async def post_to_channel(bot,ChanelID,text):
     msg = await bot.send_message(chat_id=ChanelID,text=text)
@@ -407,4 +494,3 @@ async def CheckUserSub(bot: Bot):
             print(f"Отправлено уведомление пользователю {user_id}")
         except Exception as e:
             print(f"❌ Не удалось отправить сообщение пользователю {user_id}: {e}")
-    

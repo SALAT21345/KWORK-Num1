@@ -173,7 +173,7 @@ def Get_Posts_From_Start_Of_Month():
         {
             "message_id": row[0],
             "date": datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S"),
-            "channel_id": -4774948031  # Заменить на твой канал
+            "channel_id": -1002899688608  # Заменить на твой канал
         }
         for row in posts
     ]
@@ -351,7 +351,7 @@ def CheckSubUser(userid):
         if result[0]:  # если HaveSub == 1
             print("Пользователь имеет подписку")
             cur.execute("SELECT StartSub FROM Users WHERE user_id =?", (userid,))
-            return cur.fetchone()
+            return True
         else:
             print("Пользователь найден, но подписки нет")
             return False
@@ -360,10 +360,4 @@ def CheckSubUser(userid):
         return False
     
 if __name__ == '__main__':
-    print(GetAllUsers())
-    GiveSubManual(
-        userid=1243576393,
-        start_date="2025-07-20",
-        end_date="2025-07-24",
-        rate=None  # или 0, если не нужно считать месяцами
-    )
+    GiveSubManual(7961153429,'2021-02-01','2023-02-01',2)
